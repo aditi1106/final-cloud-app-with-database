@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.http import HttpResponseRedirect
 # <HINT> Import any new Models here
-from .models import Course, Enrollment
+from .models import Course, Enrollment, Question, Choice, Submission
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse
@@ -132,5 +132,65 @@ def enroll(request, course_id):
         # Calculate the total score
 #def show_exam_result(request, course_id, submission_id):
 
+def extract_answers(request):
+   submitted_answers = []
+   for key in request.POST:
+       if key.startswith('choice'):
+           value = request.POST[key]
+           choice_id = int(value)
+           submitted_answers.append(choice_id)
+   return submitted_answers
 
+
+def submit(request, course_id):
+    user = request.user
+    course = get_object_or_404(Course, id=course_id)
+    enrollment = Enrollment.objects.get(user=user, course=course)
+
+    submission = Submission.objects.create(enrollment=enrollment)
+
+    submitted_answers = []
+    for key in request.POST:
+        if key.startswith('choice'):
+            value = request.POST[key]
+            choice_id = int(value)
+            submitted_answers.append(choice_id)
+
+    for choice_id in submitted_answers:
+        choice_obj = Choice.objects.get(id=choice_id)
+        submission.choices.add(choice_obj)
+    submission.save()  # saving the changes
+    print(f"Submitted exam for user {user} in course {course_id}")
+
+    return HttpResponseRedirect(reverse(viewname='onlinecourse:show_exam_result', args=(course_id, submission.id)))
+
+
+def show_exam_result(request, course_id, submission_id):
+    course_obj = Course.objects.get(id=course_id)
+
+    context = {}
+    context['course'] = course_obj
+
+    submission_choices = Submission.objects.get(id=submission_id).choices.all()
+    context['choices'] = submission_choices
+    print("Submission choices: \n", submission_choices)
+
+    all_exam_questions = Question.objects.filter(courses=course_id)
+    context['questions'] = all_exam_questions
+    print("All exam questions: \n", all_exam_questions)
+
+    all_exam_choices = [question.choice_set for question in all_exam_questions]
+    print("All exam choices: \n", all_exam_choices)
+
+    submission_score = 0
+    max_score = 0
+    for question in all_exam_questions:
+        max_score += question.marks
+        if question.answered_correctly(submission_choices):
+            submission_score += question.marks
+        
+    context['grade'] = round(submission_score / max_score * 100)
+    print("Submission grade: ", submission_score)
+
+    return render(request, 'onlinecourse/exam_result_bootstrap.html', context)
 
